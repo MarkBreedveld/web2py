@@ -1034,6 +1034,7 @@ class BaseAdapter(ConnectionPool):
         else:
             return str(expression)
 
+
     def alias(self, table, alias):
         """
         Given a table object, makes a new table object
@@ -3815,13 +3816,13 @@ class MongoDBAdapter(NoSQLAdapter):
         else:
             pass
     
-    def count(self,query,distinct=None):
+    def count(self,query,distinct=None,snapshot=True):
         if distinct:
             raise RuntimeError, "COUNT DISTINCT not supported"
         if not isinstance(query,Query):
             raise SyntaxError, "Not Supported"
         tablename = self.get_table(query)
-        return int(self.select(query,[self.db[tablename]._id],{},count=True)['count'])
+        return int(self.select(query,[self.db[tablename]._id],{},count=True,snapshot=snapshot)['count'])
         #Maybe it would be faster if we just implemented the pymongo .count() function which is probably quicker?
         # therefor call __select() connection[table].find(query).count() Since this will probably reduce the return set?
 
@@ -3936,7 +3937,7 @@ class MongoDBAdapter(NoSQLAdapter):
    
     # need to define all the 'sql' methods gt,lt etc....
 
-    def select(self,query,fields,attributes,count=False):
+    def select(self,query,fields,attributes,count=False,snapshot=False):
 
         tablename, mongoqry_dict , mongofields_dict, mongosort_list, limitby_limit, limitby_skip = self._select(query,fields,attributes)
         try:
@@ -3946,9 +3947,9 @@ class MongoDBAdapter(NoSQLAdapter):
         print "mongofields_dict=%s" % mongofields_dict
         ctable = self.connection[tablename]
         if count:
-            return {'count' : ctable.find(mongoqry_dict,mongofields_dict,skip=limitby_skip, limit=limitby_limit, sort=mongosort_list).count()}
+            return {'count' : ctable.find(mongoqry_dict,mongofields_dict,skip=limitby_skip, limit=limitby_limit, sort=mongosort_list,snapshot=snapshot).count()}
         else:
-            mongo_list_dicts = ctable.find(mongoqry_dict,mongofields_dict,skip=limitby_skip, limit=limitby_limit, sort=mongosort_list) # pymongo cursor object
+            mongo_list_dicts = ctable.find(mongoqry_dict,mongofields_dict,skip=limitby_skip, limit=limitby_limit, sort=mongosort_list,snapshot=snapshot) # pymongo cursor object
         print "mongo_list_dicts=%s" % mongo_list_dicts 
         #if mongo_list_dicts.count() > 0: #
             #colnames = mongo_list_dicts[0].keys() # assuming all docs have same "shape", grab colnames from first dictionary (aka row)
@@ -4135,11 +4136,13 @@ class MongoDBAdapter(NoSQLAdapter):
     def drop(self, table, mode=''):
         ctable = self.connection[table._tablename]
         ctable.drop()
-    
+
+
     def truncate(self,table,mode):
         ctable = self.connection[table._tablename]
         ctable.remove(None, safe=True)
 
+    #TODO implement update
     def update(self,tablename,query,fields):
         if not isinstance(query,Query):
             raise SyntaxError, "Not Supported"
@@ -4177,21 +4180,25 @@ class MongoDBAdapter(NoSQLAdapter):
         items.append(self.expand(item, first.type) for item in second)
         return {self.expand(first) : {"$in" : items} }
 
+    #TODO verify full compatibilty with official SQL Like operator
     def LIKE(self, first, second):
         import re
         return {self.expand(first) : {'$regex' : re.escape(self.expand(second, 'string')).replace('%','.*')}}
 
+    #TODO verify full compatibilty with official SQL Like operator
     def STARTSWITH(self, first, second):
         #TODO  Solve almost the same problem as with endswith
         import re
         return {self.expand(first) : {'$regex' : '^' + re.escape(self.expand(second, 'string'))}}
 
+    #TODO verify full compatibilty with official SQL Like operator
     def ENDSWITH(self, first, second):
         #escaping regex operators?
         #TODO if searched for a name like zsa_corbitt and the function is endswith('a') then this is also returned. Aldo it end with a t
         import re
         return {self.expand(first) : {'$regex' : re.escape(self.expand(second, 'string')) + '$'}}
 
+    #TODO verify full compatibilty with official oracle contains operator
     def CONTAINS(self, first, second):
         #There is a technical difference, but mongodb doesn't support that, but the result will be the same
         #TODO contains operators need to be transformed to Regex
@@ -4247,26 +4254,31 @@ class MongoDBAdapter(NoSQLAdapter):
         result[self.expand(first)] = {'$gte': self.expand(second)}
         return result
 
+    #TODO javascript has math
     def ADD(self, first, second):
         raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
         return '%s + %s' % (self.expand(first), self.expand(second, first.type))
 
+    #TODO javascript has math
     def SUB(self, first, second):
         raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
         return '(%s - %s)' % (self.expand(first), self.expand(second, first.type))
 
+    #TODO javascript has math
     def MUL(self, first, second):
         raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
         return '(%s * %s)' % (self.expand(first), self.expand(second, first.type))
+        #TODO javascript has math
 
     def DIV(self, first, second):
         raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
         return '(%s / %s)' % (self.expand(first), self.expand(second, first.type))
-
+    #TODO javascript has math
     def MOD(self, first, second):
         raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
         return '(%s %% %s)' % (self.expand(first), self.expand(second, first.type))
 
+    #TODO javascript can do this
     def AS(self, first, second):
         raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
         return '%s AS %s' % (self.expand(first), second)
@@ -4276,6 +4288,7 @@ class MongoDBAdapter(NoSQLAdapter):
         raise NotSupported, "This is not possible in NoSQL, but can be simulated with a wrapper."
         return '%s ON %s' % (self.expand(first), self.expand(second))
 
+    #TODO is this used in mongodb?
     def COMMA(self, first, second):
         return '%s, %s' % (self.expand(first), self.expand(second))
 
