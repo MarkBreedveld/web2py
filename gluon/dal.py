@@ -3771,19 +3771,11 @@ class MongoDBAdapter(NoSQLAdapter):
         #synchronous, except when overruled by either this default or function parameter
         self.defaultsafe = adapter_args.get('safe',True)
 
-        m = re.compile('^(?P<host>[^\:/]+)(\:(?P<port>[0-9]+))?/(?P<db>.+)$').match(self.uri[10:])
-        if not m:
-            raise SyntaxError, "Invalid URI string in DAL: %s" % self.uri
-        host = m.group('host')
-        if not host:
-            raise SyntaxError, 'mongodb: host name required'
-        dbname = m.group('db')
-        if not dbname:
-            raise SyntaxError, 'mongodb: db name required'
-        port = int(m.group('port') or 27017)
-        driver_args.update(dict(host=host,port=port))
-        def connect(dbname=dbname,driver_args=driver_args):
-            return pymongo.Connection(**driver_args)[dbname]
+        def connect(uri=self.uri):
+            try:
+                return pymongo.Connection(uri)
+            except Exception as inst:
+                raise SyntaxError, "This is not an official Mongodb uri (http://www.mongodb.org/display/DOCS/Connections) Error : %s" % inst
         self.pool_connection(connect,cursor=False)
 
     def represent(self, obj, fieldtype):
@@ -4322,7 +4314,7 @@ ADAPTERS = {
     'google:sql': GoogleSQLAdapter,
     'couchdb': CouchDBAdapter,
     'mongodb': MongoDBAdapter,
-}
+    }
 
 
 def sqlhtml_validators(field):
