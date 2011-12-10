@@ -3758,6 +3758,7 @@ class MongoDBAdapter(NoSQLAdapter):
                  pool_size=0,folder=None,db_codec ='UTF-8',
                  credential_decoder=lambda x:x, driver_args={},
                  adapter_args={}):
+        import pymongo.uri_parser
         self.db = db
         self.uri = uri
         self.dbengine = 'mongodb'
@@ -3771,9 +3772,12 @@ class MongoDBAdapter(NoSQLAdapter):
         #synchronous, except when overruled by either this default or function parameter
         self.defaultsafe = adapter_args.get('safe',True)
 
-        def connect(uri=self.uri):
+        m = pymongo.uri_parser.parse_uri(uri)
+        if not m.get('database'):
+            raise SyntaxError, "Database is required"
+        def connect(uri=self.uri,m=m):
             try:
-                return pymongo.Connection(uri)
+                return pymongo.Connection(uri)[m.get('database')]
             except Exception as inst:
                 raise SyntaxError, "This is not an official Mongodb uri (http://www.mongodb.org/display/DOCS/Connections) Error : %s" % inst
         self.pool_connection(connect,cursor=False)
@@ -4140,6 +4144,135 @@ class MongoDBAdapter(NoSQLAdapter):
             raise SyntaxError, "Not Supported"
         
         raise RuntimeError, "Not implemented"
+
+    def bulk_insert(self, table, items):
+        return [self.insert(table,item) for item in items]
+
+    #TODO This will probably not work:(
+    def NOT(self, first):
+        result = {}
+        result["$not"] = self.expand(first)
+        return result
+
+    def AND(self,first,second):
+        f = self.expand(first)
+        s = self.expand(second)
+        f.update(s)
+        return f
+
+    def OR(self,first,second):
+        # pymongo expects: .find( {'$or' : [{'name':'1'}, {'name':'2'}] } )
+        result = {}
+        f = self.expand(first)
+        s = self.expand(second)
+        result['$or'] = [f,s]
+        return result
+
+    def BELONGS(self, first, second):
+        if isinstance(second, str):
+            return {self.expand(first) : {"$in" : [ second[:-1]]} }
+        elif second==[] or second==():
+            return {1:0}
+        items.append(self.expand(item, first.type) for item in second)
+        return {self.expand(first) : {"$in" : items} }
+
+    def LIKE(self, first, second):
+        #escaping regex operators?
+        return {self.expand(first) : ('%s' % self.expand(second, 'string').replace('%','/'))}
+
+    def STARTSWITH(self, first, second):
+        #escaping regex operators?
+        return {self.expand(first) : ('/^%s/' % self.expand(second, 'string'))}
+
+    def ENDSWITH(self, first, second):
+        #escaping regex operators?
+        return {self.expand(first) : ('/%s^/' % self.expand(second, 'string'))}
+
+    def CONTAINS(self, first, second):
+        #There is a technical difference, but mongodb doesn't support that, but the result will be the same
+        return {self.expand(first) : ('/%s/' % self.expand(second, 'string'))}
+
+    def EQ(self,first,second):
+        result = {}
+        #if second is None:
+            #return '(%s == null)' % self.expand(first)
+        #return '(%s == %s)' % (self.expand(first),self.expand(second,first.type))
+        result[self.expand(first)] = self.expand(second)
+        return result
+    
+    def NE(self, first, second=None):
+        print "in NE"
+        result = {}
+        result[self.expand(first)] = {'$ne': self.expand(second)}
+        return result
+
+    def LT(self,first,second=None):
+        if second is None:
+            raise RuntimeError, "Cannot compare %s < None" % first
+        print "in LT"
+        result = {}
+        result[self.expand(first)] = {'$lt': self.expand(second)}
+        return result
+
+    def LE(self,first,second=None):
+        if second is None:
+            raise RuntimeError, "Cannot compare %s <= None" % first
+        print "in LE"
+        result = {}
+        result[self.expand(first)] = {'$lte': self.expand(second)}
+        return result
+
+    def GT(self,first,second):
+        print "in GT"
+        #import pymongo.objectid
+        result = {}
+        #if expanded_first == '_id':
+            #if expanded_second != 0 and not isinstance(second,pymongo.objectid.ObjectId):
+                #raise SyntaxError, 'second argument must be of type bson.objectid.ObjectId'
+            #elif expanded_second == 0:
+                #expanded_second = pymongo.objectid.ObjectId('000000000000000000000000')
+        result[self.expand(first)] = {'$gt': self.expand(second)}
+        return result
+
+    def GE(self,first,second=None):
+        if second is None:
+            raise RuntimeError, "Cannot compare %s >= None" % first
+        print "in GE"
+        result = {}
+        result[self.expand(first)] = {'$gte': self.expand(second)}
+        return result
+
+    def ADD(self, first, second):
+        raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
+        return '%s + %s' % (self.expand(first), self.expand(second, first.type))
+
+    def SUB(self, first, second):
+        raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
+        return '(%s - %s)' % (self.expand(first), self.expand(second, first.type))
+
+    def MUL(self, first, second):
+        raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
+        return '(%s * %s)' % (self.expand(first), self.expand(second, first.type))
+
+    def DIV(self, first, second):
+        raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
+        return '(%s / %s)' % (self.expand(first), self.expand(second, first.type))
+
+    def MOD(self, first, second):
+        raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
+        return '(%s %% %s)' % (self.expand(first), self.expand(second, first.type))
+
+    def AS(self, first, second):
+        raise NotSupported, "This must yet be replaced with javescript in order to accomplish this. Sorry"
+        return '%s AS %s' % (self.expand(first), second)
+
+    #We could implement an option that simulates a full featured SQL database. But I think the option should be set explicit or implemented as another library.
+    def ON(self, first, second):
+        raise NotSupported, "This is not possible in NoSQL, but can be simulated with a wrapper."
+        return '%s ON %s' % (self.expand(first), self.expand(second))
+
+    def COMMA(self, first, second):
+        return '%s, %s' % (self.expand(first), self.expand(second))
 
     def bulk_insert(self, table, items):
         return [self.insert(table,item) for item in items]
