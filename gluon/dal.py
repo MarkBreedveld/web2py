@@ -3758,29 +3758,35 @@ class MongoDBAdapter(NoSQLAdapter):
                  pool_size=0,folder=None,db_codec ='UTF-8',
                  credential_decoder=lambda x:x, driver_args={},
                  adapter_args={}):
-        import pymongo.uri_parser
-        self.db = db
-        self.uri = uri
-        self.dbengine = 'mongodb'
-        self.folder = folder
-        db['_lastsql'] = ''
-        self.db_codec = 'UTF-8'
-        self.pool_size = pool_size
-        #this is the minimum amount of replicates that it should wait for on insert/update
-        self.minimumreplication = adapter_args.get('minimumreplication',0)
-        #by default alle insert and selects are performand asynchronous, but now the default is
-        #synchronous, except when overruled by either this default or function parameter
-        self.defaultsafe = adapter_args.get('safe',True)
+        try:
+            import pymongo.uri_parser
+            self.db = db
+            self.uri = uri
+            self.dbengine = 'mongodb'
+            self.folder = folder
+            db['_lastsql'] = ''
+            self.db_codec = 'UTF-8'
+            self.pool_size = pool_size
+            #this is the minimum amount of replicates that it should wait for on insert/update
+            self.minimumreplication = adapter_args.get('minimumreplication',0)
+            #by default alle insert and selects are performand asynchronous, but now the default is
+            #synchronous, except when overruled by either this default or function parameter
+            self.safe = adapter_args.get('safe',True)
 
-        m = pymongo.uri_parser.parse_uri(uri)
-        if not m.get('database'):
-            raise SyntaxError, "Database is required"
-        def connect(uri=self.uri,m=m):
-            try:
-                return pymongo.Connection(uri)[m.get('database')]
-            except Exception as inst:
-                raise SyntaxError, "This is not an official Mongodb uri (http://www.mongodb.org/display/DOCS/Connections) Error : %s" % inst
-        self.pool_connection(connect,cursor=False)
+            m = pymongo.uri_parser.parse_uri(uri)
+            if not m.get('database'):
+                raise SyntaxError, "Database is required"
+            def connect(uri=self.uri,m=m):
+                try:
+                    return pymongo.Connection(uri)[m.get('database')]
+                except pymongo.errors.ConnectionFailure as inst:
+                    raise SyntaxError, "The connection to " + uri + " could not be made"
+                except Exception as inst:
+                    raise SyntaxError, "This is not an official Mongodb uri (http://www.mongodb.org/display/DOCS/Connections) Error : %s" % inst
+            self.pool_connection(connect,cursor=False)
+        except ImportError:
+            raise SyntaxError, "Unable to import driver"
+
 
     def represent(self, obj, fieldtype):
         value = NoSQLAdapter.represent(self, obj, fieldtype)
@@ -3800,7 +3806,9 @@ class MongoDBAdapter(NoSQLAdapter):
     
     #Safe determines whether a asynchronious request is done or a synchronious action is done
     #For safety, we use by default synchronious requests
-    def insert(self,table,fields,safe=True):
+    def insert(self,table,fields,safe=None):
+        if safe==None:
+            safe=self.safe
         ctable = self.connection[table._tablename]
         values = dict((k.name,self.represent(v,table[k.name].type)) for k,v in fields)
         ctable.insert(values,safe=safe)
@@ -4134,16 +4142,52 @@ class MongoDBAdapter(NoSQLAdapter):
         ctable.drop()
 
 
-    def truncate(self,table,mode):
+    def truncate(self,table,mode,safe=None):
+        if safe==None:
+            safe=self.safe
         ctable = self.connection[table._tablename]
         ctable.remove(None, safe=True)
 
-    #TODO implement update
-    def update(self,tablename,query,fields):
+    #the update function should return a string
+    def oupdate(self,tablename,query,fields):
         if not isinstance(query,Query):
             raise SyntaxError, "Not Supported"
-        
-        raise RuntimeError, "Not implemented"
+        filter = None
+        if query:
+            filter = self.expand(query)
+        f_v = []
+
+
+        modify = { '$set' : dict(((k.name,self.represent(v,k.type)) for k,v in fields)) }
+        return modify,filter
+
+    #TODO implement update
+    #TODO implement set operator
+    #TODO implement find and modify
+    #todo implement complex update
+    def update(self,tablename,query,fields,safe=None):
+        if safe==None:
+            safe=self.safe
+        #return amount of adjusted rows or zero, but no exceptions related not finding the result
+        if not isinstance(query,Query):
+            raise RuntimeError, "Not implemented"
+        amount = self.count(query,False)
+        modify,filter = self.oupdate(tablename,query,fields)
+        try:
+            return self.connection[tablename].update(filter,modify,multi=True,safe=safe).n
+        except:
+        #TODO Reverse update query to verifiy that the query succeded
+            return 0
+    """
+    An special update operator that enables the update of specific field
+    return a dict
+    """
+
+
+
+    #this function returns a dict with the where clause and update fields
+    def _update(self,tablename,query,fields):
+        return str(self.oupdate(tablename,query,fields))
 
     def bulk_insert(self, table, items):
         return [self.insert(table,item) for item in items]
@@ -6042,6 +6086,7 @@ class Expression(object):
 
     def with_alias(self,alias):
         return Expression(self.db,self.db._adapter.AS,self,alias,self.type)
+
 
     # for use in both Query and sortby
 
