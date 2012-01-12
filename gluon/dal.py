@@ -4174,9 +4174,14 @@ class MongoDBAdapter(NoSQLAdapter):
         amount = self.count(query,False)
         modify,filter = self.oupdate(tablename,query,fields)
         try:
-            return self.connection[tablename].update(filter,modify,multi=True,safe=safe).n
+            if safe:
+                return self.connection[tablename].update(filter,modify,multi=True,safe=safe).n
+            else:
+                amount =self.count(query)
+                self.connection[tablename].update(filter,modify,multi=True,safe=safe)
+                return amount
         except:
-        #TODO Reverse update query to verifiy that the query succeded
+            #TODO Reverse update query to verifiy that the query succeded
             return 0
     """
     An special update operator that enables the update of specific field
