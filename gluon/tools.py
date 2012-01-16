@@ -24,7 +24,7 @@ import cStringIO
 from email import MIMEBase, MIMEMultipart, MIMEText, Encoders, Header, message_from_string
 
 from contenttype import contenttype
-from storage import Storage, StorageList, Settings, Messages
+from storage import Storage, PickleableStorage, StorageList, Settings, Messages
 from utils import web2py_uuid
 from fileutils import read_file
 from gluon import *
@@ -72,11 +72,7 @@ def call_or_redirect(f,*args):
 
 def replace_id(url, form):
     if url and not url[0] == '/' and url[:4] != 'http':
-        # this is here for backward compatibility
         return URL(url.replace('[id]', str(form.vars.id)))
-    elif url:
-        # this allows http://..../%(id)s/%(name)s/etc.
-        return url % form.vars
     return url
 
 class Mail(object):
@@ -1234,10 +1230,10 @@ class Auth(object):
                           label=self.messages.label_first_name),
                     Field('last_name', length=128, default='',
                           label=self.messages.label_last_name),
-                    Field('username', length=128, default='',
-                          label=self.messages.label_username),
                     Field('email', length=512, default='',
                           label=self.messages.label_email),
+                    Field('username', length=128, default='',
+                          label=self.messages.label_username),
                     Field(passfield, 'password', length=512,
                           readable=False, label=self.messages.label_password),
                     Field('registration_key', length=512,
@@ -1623,7 +1619,8 @@ class Auth(object):
             username = 'username'
         else:
             username = 'email'
-        if 'username' in table_user.fields or not self.settings.login_email_validate:
+        if 'username' in table_user.fields or \
+                not self.settings.login_email_validate:
             tmpvalidator = IS_NOT_EMPTY(error_message=self.messages.is_empty)
         else:
             tmpvalidator = IS_EMAIL(error_message=self.messages.invalid_email)
@@ -1778,7 +1775,8 @@ class Auth(object):
             session.auth = Storage(
                 user = user,
                 last_visit = request.now,
-                expiration = self.settings.long_expiration,
+                expiration = request.vars.get("remember",False) and \
+                    self.settings.long_expiration or self.settings.expiration,
                 remember = request.vars.has_key("remember"),
                 hmac_key = web2py_uuid()
                 )
@@ -1791,6 +1789,8 @@ class Auth(object):
         if self.settings.login_form == self:
             if accepted_form:
                 callback(onaccept,form)
+                if next == session._auth_next:
+                     session._auth_next = None
                 next = replace_id(next, form)
                 redirect(next)
             table_user[username].requires = old_requires
@@ -1910,7 +1910,8 @@ class Auth(object):
                     response.flash = self.messages.unable_send_email
                     return form
                 session.flash = self.messages.email_sent
-            if self.settings.registration_requires_approval:
+            if self.settings.registration_requires_approval and \
+               not self.settings.registration_requires_verification:
                 table_user[form.vars.id] = dict(registration_key='pending')
                 session.flash = self.messages.registration_pending
             elif (not self.settings.registration_requires_verification or \
@@ -2517,16 +2518,11 @@ class Auth(object):
                                 self.settings.login_url+\
                                     '?_next='+urllib.quote(next))
 
-                #Check condition variable.
-                #Since condition could be callable, following cases could occur:
-                # 1. condition == True => ok
-                # 2. condition == False => failed
-                # 3. condition is NOT callable but it NOT None and NOT False and NOT 0 => failed
-                # 4. condition is callable -> condition() is True => ok
-                # 5. condition is callable -> condition() is False  => failed
-                # Note: Order is important! At the end condition has to be checked against True
-                # otherwise case 3 would be ok.
-                if not (callable(condition) and condition() == True) and not condition == True:
+                if callable(condition):
+                    flag = condition()
+                else:
+                    flag = condition
+                if not flag:
                     current.session.flash = self.messages.access_denied
                     return call_or_redirect(
                         self.settings.on_failed_authorization)

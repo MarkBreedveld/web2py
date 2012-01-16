@@ -18,8 +18,8 @@ from storage import Storage, List
 from streamer import streamer, stream_file_or_304_or_206, DEFAULT_CHUNK_SIZE
 from xmlrpc import handler
 from contenttype import contenttype
-from html import xmlescape, TABLE, TR, PRE
-from http import HTTP
+from html import xmlescape, TABLE, TR, PRE, URL
+from http import HTTP, redirect
 from fileutils import up
 from serializers import json, custom_json
 import settings
@@ -109,6 +109,16 @@ class Request(Storage):
         for key,value in user_agent.items():
             if isinstance(value,dict): user_agent[key] = Storage(value)
         return user_agent
+        
+    def requires_https(self):
+        """
+        If request comes in over HTTP, redirect it to HTTPS
+        and secure the session.
+        """
+        if not global_settings.cronjob and not self.is_https:
+            redirect(URL(scheme='https', args=self.args, vars=self.vars))
+        
+        current.session.secure()
 
     def restful(self):
         def wrapper(action,self=self):
@@ -223,12 +233,15 @@ class Response(Storage):
             # cache for 5 minutes by default
             cache = self.cache_includes or (current.cache.ram, 60*5)
             def call_minify():
-                return minify.minify(files,URL('static','temp'),
+                return minify.minify(files,
+                                     URL('static','temp'),
                                      current.request.folder,
-                                     self.optimize_css,self.optimize_js)
+                                     self.optimize_css,
+                                     self.optimize_js)
             if cache:
                 cache_model, time_expire = cache
-                files = cache_model('response.files.minified',call_minify,
+                files = cache_model('response.files.minified',
+                                    call_minify,
                                     time_expire)
             else:
                 files = call_minify()
@@ -538,7 +551,7 @@ class Session(Storage):
 
         (record_id_name, table, record_id, unique_key) = \
             response._dbtable_and_field
-        dd = dict(locked=False, client_ip=request.env.remote_addr,
+        dd = dict(locked=False, client_ip=request.client.replace(':','.'),
                   modified_datetime=request.now,
                   session_data=cPickle.dumps(dict(self)),
                   unique_key=unique_key)

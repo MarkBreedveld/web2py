@@ -135,7 +135,7 @@ class DoubleWidget(StringWidget):
 
 
 class DecimalWidget(StringWidget):
-    _class = 'double'
+    _class = 'decimal'
 
 
 class TimeWidget(StringWidget):
@@ -876,10 +876,10 @@ class SQLFORM(FORM):
                     dspval = ''
             elif field.type == 'blob':
                 continue
-            elif field.type in self.widgets:
-                inp = self.widgets[field.type].widget(field, default)
             else:
-                inp = self.widgets.string.widget(field, default)
+                field_type = widget_class.match(str(field.type)).group()
+                field_type = field_type in self.widgets and field_type or 'string'
+                inp = self.widgets[field_type].widget(field, default)
 
             xfields.append((row_id,label,inp,comment))
             self.custom.dspval[fieldname] = dspval or nbsp
@@ -982,11 +982,11 @@ class SQLFORM(FORM):
                 table.append(LI(DIV(a,_class='w2p_fl'),
                                 div_b,
                                 DIV(c,_class='w2p_fc'),_id=id))
-        elif type(self.formstyle) == type(lambda:None):
+        elif callable(self.formstyle):
             table = TABLE()
             for id,a,b,c in xfields:
-                td_b = self.field_parent[id] = TD(b,_class='w2p_fw')
-                newrows = self.formstyle(id,a,td_b,c)
+                raw_b = self.field_parent[id] = b 
+                newrows = self.formstyle(id,a,raw_b,c)
                 if type(newrows).__name__ != "tuple":
                     newrows = [newrows]
                 for newrow in newrows:
@@ -1319,13 +1319,14 @@ class SQLFORM(FORM):
             search_options['string'] = ['=','!=','<','>','<=','>=']
             search_options['text'] = ['=','!=','<','>','<=','>=']
         criteria = []
-        selectfields = {'':''}
+        selectfields = []
         for field in fields:
             name = str(field).replace('.','-')
             criterion = []
             options = search_options.get(field.type,None)
             if options:
-                selectfields[T(field.label)] = str(field)
+                label = isinstance(field.label,str) and T(field.label) or field.label
+                selectfields.append((str(field),label))
                 operators = SELECT(*[T(option) for option in options])
                 if field.type=='boolean':
                     value_input = SELECT(
@@ -1346,7 +1347,7 @@ class SQLFORM(FORM):
         criteria.insert(0,SELECT(
                 _id="w2p_query_fields",
                 _onchange="jQuery('.w2p_query_row').hide();jQuery('#w2p_field_'+jQuery(this).val().replace('.','-')).show();",
-                *[OPTION(label, _value=selectfields[label]) for label in selectfields]))
+                *[OPTION(label, _value=fname) for fname,label in selectfields]))
         fadd = SCRIPT("""
         jQuery('#w2p_query_panel input,#w2p_query_panel select').css(
                'width','auto').css('float','left');
@@ -1365,7 +1366,7 @@ class SQLFORM(FORM):
         """)
         return CAT(
             INPUT(
-                _value="query",_type="button",_id="w2p_query_trigger",
+                _value=T("Query"),_type="button",_id="w2p_query_trigger",
                 _onclick="jQuery('#w2p_query_fields').val('');jQuery('#w2p_query_panel').slideToggle();"),
             DIV(_id="w2p_query_panel",
                 _style='position:absolute;z-index:1000',
@@ -1461,8 +1462,7 @@ class SQLFORM(FORM):
         create = wenabled and create
         editable = wenabled and editable
         deletable = wenabled and deletable
-        if search_widget=='default':
-            search_widget = SQLFORM.search_menu
+
         def url(**b):
             b['args'] = args+b.get('args',[])
             b['user_signature'] = user_signature
@@ -1563,7 +1563,7 @@ class SQLFORM(FORM):
             check_authorization()
             table = db[request.args[-2]]
             record = table(request.args[-1]) or redirect(URL('error'))
-            form = SQLFORM(table,record,upload=upload,
+            form = SQLFORM(table,record,upload=upload,ignore_rw=ignore_rw,
                            readonly=True,_class='web2py_form')
             res = DIV(buttons(edit=editable,record=record),form,
                       formfooter,_class=_class)
@@ -1575,7 +1575,7 @@ class SQLFORM(FORM):
             check_authorization()
             table = db[request.args[-2]]
             record = table(request.args[-1]) or redirect(URL('error'))
-            edit_form = SQLFORM(table,record,upload=upload,
+            edit_form = SQLFORM(table,record,upload=upload,ignore_rw=ignore_rw,
                                 deletable=deletable,
                                 _class='web2py_form')
             edit_form.process(formname=formname,
@@ -1592,7 +1592,7 @@ class SQLFORM(FORM):
             check_authorization()
             table = db[request.args[-2]]
             if ondelete:
-                ondelete(table,request.args[-1],ret)
+                ondelete(table,request.args[-1])
             ret = db(table.id==request.args[-1]).delete()
             return ret
         elif csv and len(request.args)>0 and request.args[-1]=='csv':
@@ -1623,16 +1623,18 @@ class SQLFORM(FORM):
         error = None
         search_form = None
         if searchable:
+            if search_widget=='default':
+                search_widget = lambda sfield, url: FORM(
+                    SQLFORM.search_menu(sfields),
+                    INPUT(_name='keywords',_value=request.vars.keywords,
+                          _id='web2py_keywords'),
+                    INPUT(_type='submit',_value=T('Search')),
+                    INPUT(_type='submit',_value=T('Clear'),
+                          _onclick="jQuery('#web2py_keywords').val('');"),
+                    _method="GET",_action=url)
             sfields = reduce(lambda a,b:a+b,
                              [[f for f in t if f.readable] for t in tables])
-            form = FORM(
-                search_widget and search_widget(sfields) or '',
-                INPUT(_name='keywords',_value=request.vars.keywords,
-                      _id='web2py_keywords'),
-                INPUT(_type='submit',_value=T('Search')),
-                INPUT(_type='submit',_value=T('Clear'),
-                      _onclick="jQuery('#web2py_keywords').val('');"),
-                _method="GET",_action=url())
+            form = search_widget and search_widget(sfields,url()) or ''
             search_form = form
             console.append(form)
             keywords = request.vars.get('keywords','')
@@ -1922,7 +1924,7 @@ class SQLFORM(FORM):
                     breadcrumbs += [A(T(db[referee]._plural),
                                       _class=trap_class(),
                                       _href=URL(args=request.args[:nargs])),
-                                    ' ',
+                                    ' > ',
                                     A(name,_class=trap_class(),
                                       _href=URL(args=request.args[:nargs]+[
                                     'view',referee,id],user_signature=True)),
@@ -1933,7 +1935,7 @@ class SQLFORM(FORM):
             if nargs>len(args)+1:
                 query = (field == id)
                 if linked_tables is None or referee in linked_tables:
-                    field.represent = lambda id,r=None,referee=referee,rep=field.represent: A(rep(id),_class=trap_class(),_href=URL(args=request.args[:nargs]+['view',referee,id], user_signature=user_signature))
+                    field.represent = lambda id,r=None,referee=referee,rep=field.represent: A(callable(rep) and rep(id) or id,_class=trap_class(),_href=URL(args=request.args[:nargs]+['view',referee,id], user_signature=user_signature))
         except (KeyError,ValueError,TypeError):
             redirect(URL(args=table._tablename))
         if nargs==len(args)+1:

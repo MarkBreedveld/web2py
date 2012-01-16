@@ -16,7 +16,7 @@ center { width:100; text-align: center; vertical-align:middle;}
 label { white-space: nowrap; }
 th, label { font-weight: bold; }
 th, td { text-align: left; vertical-align: top; padding: 2px 5px 2px 5px;}
-form table tr td label { text-align: right; }
+form table tr td label { text-align: left; }
 p, table, ol, ul { padding: 0.5em 0 0.5em 0 }
 p {text-align: justify }
 ol, ul { padding-left: 30px }
@@ -24,10 +24,11 @@ li { margin-bottom: 0.5em; }
 span, input, select, textarea, button, label, a { display: inline }
 img { border: 0; }
 blockquote, blockquote p, p blockquote { font-style: italic; margin: 0.5em 30px 0.5em 30px; font-size: 0.9em}
-em { font-style: italic; }
+i, em { font-style: italic; }
 strong { font-weight: bold; }
 small { font-size: 0.8em; }
 textarea { width: 600px; }
+code { font-family: Courier;}
 input[type=text], input[type=password], select { width: 300px; }
 /** end **/
 
@@ -67,7 +68,6 @@ body {
 .footer {
     background-color: #ECECEC;
 }
-
 .header {
 	// background: <fill here for header image>;
 }
@@ -163,8 +163,7 @@ div.error {
     -webkit-border-radius: 5px;
 }
 
-.breadcrumbs {
-}
+.breadcrumbs { float: left; }
 
 .copyright {float: left;}
 

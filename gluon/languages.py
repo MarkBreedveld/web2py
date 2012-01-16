@@ -41,7 +41,7 @@ def read_dict_aux(filename):
     fp = open(filename, 'r')
     portalocker.lock(fp, portalocker.LOCK_SH)
     lang_text = fp.read().replace('\r\n', '\n')
-    portalocker.unlock(fp)
+    # needed? portalocker.unlock(fp)
     fp.close()
     if not lang_text.strip():
         return {}
@@ -92,7 +92,7 @@ def utf8_repr(s):
 def write_dict(filename, contents):
     try:
         fp = open(filename, 'w')
-    except IOError:
+    except (IOError, OSError):
         if not is_gae:
             logging.warning('Unable to write to file %s' % filename)
         return

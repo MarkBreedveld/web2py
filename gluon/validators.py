@@ -56,7 +56,9 @@ __all__ = [
     ]
 
 def translate(text):
-    if isinstance(text,(str,unicode)):
+    if text is None:
+        return None
+    elif isinstance(text,(str,unicode)):
         from globals import current
         if hasattr(current,'T'):
             return str(current.T(text))
@@ -145,7 +147,7 @@ class IS_MATCH(Validator):
     """
 
     def __init__(self, expression, error_message='invalid expression',
-                 strict=False, search=False):
+                 strict=False, search=False, extract=False):
         if strict or not search:
             if not expression.startswith('^'):
                 expression = '^(%s)' % expression
@@ -154,11 +156,12 @@ class IS_MATCH(Validator):
                 expression = '(%s)$' % expression
         self.regex = re.compile(expression)
         self.error_message = error_message
+        self.extract = extract
 
     def __call__(self, value):
         match = self.regex.search(value)
-        if match:
-            return (match.group(), None)
+        if match is not None:
+            return (self.extract and match.group() or value, None)
         return (value, translate(self.error_message))
 
 
@@ -510,6 +513,7 @@ class IS_NOT_IN_DB(Validator):
         field,
         error_message='value already in database or empty',
         allowed_override=[],
+        ignore_common_filters=False,
         ):
 
         from dal import Table
@@ -523,7 +527,8 @@ class IS_NOT_IN_DB(Validator):
         self.error_message = error_message
         self.record_id = 0
         self.allowed_override = allowed_override
-
+        self.ignore_common_filters = ignore_common_filters
+        
     def set_self_id(self, id):
         self.record_id = id
 
@@ -535,7 +540,7 @@ class IS_NOT_IN_DB(Validator):
             return (value, None)
         (tablename, fieldname) = str(self.field).split('.')
         field = self.dbset.db[tablename][fieldname]
-        rows = self.dbset(field == value).select(limitby=(0, 1))
+        rows = self.dbset(field == value, ignore_common_filters = self.ignore_common_filters).select(limitby=(0, 1))
         if len(rows) > 0:
             if isinstance(self.record_id, dict):
                 for f in self.record_id:
@@ -2216,19 +2221,19 @@ class IS_DATE_IN_RANGE(IS_DATE):
                 error_message = "enter date on or after %(min)s"
             else:
                 error_message = "enter date in range %(min)s %(max)s"
-        d = dict(min=minimum, max=maximum)
+        extremes = dict(min=minimum, max=maximum)
         IS_DATE.__init__(self,
                          format = format,
-                         error_message = error_message % d)
+                         error_message = translate(error_message) % extremes)
 
     def __call__(self, value):
         (value, msg) = IS_DATE.__call__(self,value)
         if msg is not None:
             return (value, msg)
         if self.minimum and self.minimum > value:
-            return (value, translate(self.error_message))
+            return (value, self.error_message)
         if self.maximum and value > self.maximum:
-            return (value, translate(self.error_message))
+            return (value, self.error_message)
         return (value, None)
 
 
@@ -2266,19 +2271,19 @@ class IS_DATETIME_IN_RANGE(IS_DATETIME):
                 error_message = "enter date and time on or after %(min)s"
             else:
                 error_message = "enter date and time in range %(min)s %(max)s"
-        d = dict(min = minimum, max = maximum)
+        extremes = dict(min = minimum, max = maximum)
         IS_DATETIME.__init__(self,
                          format = format,
-                         error_message = error_message % d)
+                         error_message = translate(error_message) % extremes)
 
     def __call__(self, value):
         (value, msg) = IS_DATETIME.__call__(self, value)
         if msg is not None:
             return (value, msg)
         if self.minimum and self.minimum > value:
-            return (value, translate(self.error_message))
+            return (value, self.error_message)
         if self.maximum and value > self.maximum:
-            return (value, translate(self.error_message))
+            return (value, self.error_message)
         return (value, None)
 
 
@@ -2610,7 +2615,7 @@ class IS_STRONG(object):
                     failures.append("May not include any numbers")
         if len(failures) == 0:
             return (value, None)
-        if not translate(self.error_message):
+        if not self.error_message:
             from html import XML
             return (value, XML('<br />'.join(failures)))
         else:
